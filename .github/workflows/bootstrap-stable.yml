@@ -1,0 +1,73 @@
+name: Bootstrap PyPaymentKit 0.5.0 Stable
+
+on:
+  push:
+    paths:
+      - ".github/workflows/bootstrap-stable.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bootstrap repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify stable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .bootstrap-v2/part-* | base64 --decode > /tmp/pypaymentkit-source.tar.xz
+          echo "be9c5c74db181c9979995b287425fd47c93f57b29654d191b08d339888fed472  /tmp/pypaymentkit-source.tar.xz" | sha256sum -c -
+          mkdir -p /tmp/pypaymentkit-source
+          tar -xJf /tmp/pypaymentkit-source.tar.xz -C /tmp/pypaymentkit-source
+          test -f /tmp/pypaymentkit-source/pyproject.toml
+          grep -q 'version = "0.5.0"' /tmp/pypaymentkit-source/pyproject.toml
+          test -f /tmp/pypaymentkit-source/.github/workflows/release.yml
+
+      - name: Replace bootstrap tree with stable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/pypaymentkit-source/. .
+          git status --short
+
+      - name: Commit stable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Release PyPaymentKit 0.5.0 stable"
+          git push origin HEAD:main
+
+      - name: Create stable tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag -a v0.5.0 -m "PyPaymentKit 0.5.0 - FastAPI Production Stable"
+          git push origin v0.5.0
+
+      - name: Dispatch stable release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if gh workflow view release.yml >/dev/null 2>&1; then
+              gh workflow run release.yml --ref v0.5.0
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "release.yml was not available after bootstrap" >&2
+          exit 1
